@@ -7,11 +7,12 @@
 #include "I2Cdev.h"
 #include <Adafruit_MPU6050.h>
 #include <Adafruit_Sensor.h>
-#include "BluetoothSerial.h"
+#include <BLEDevice.h>
+#include <BLEUtils.h>
+#include <BLEServer.h>
 
-#if !defined(CONFIG_BT_ENABLED) || !defined(CONFIG_BLUEDROID_ENABLED)
-#error Bluetooth is not enabled! Please run `make menuconfig` to and enable it
-#endif
+#define SERVICE_UUID        "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
+#define CHARACTERISTIC_UUID "beb5483e-36e1-4688-b7f5-ea07361b26a8"
 
 // Pin Definitions
 #define FLEX_PIN_POLEGAR   12
@@ -26,26 +27,6 @@ int16_t mpu6050Gx, mpu6050Gy, mpu6050Gz;
 
 //POLEGAR
 int sensorMinPolegar = 500;
-int sensorMaxPolegar = 2277;
-
-//INDICADOR
-int sensorMinIndicador = 1450; 
-int sensorMaxIndicador = 3153;
-
-//MEIO
-int sensorMinMeio = 1450; 
-int sensorMaxMeio = 3259;
-
-//ANELAR
-int sensorMinAnelar = 1450; 
-int sensorMaxAnelar = 3221;
-
-//MENOR
-int sensorMinMenor = 500; 
-int sensorMaxMenor = 2289;
-/*
-//POLEGAR
-int sensorMinPolegar = 500; 
 int sensorMaxPolegar = 0;
 
 //INDICADOR
@@ -63,7 +44,6 @@ int sensorMaxAnelar = 0;
 //MENOR
 int sensorMinMenor = 500; 
 int sensorMaxMenor = 0;
-*/
 
 // object initialization
 Flex FLEX_POLEGAR(FLEX_PIN_POLEGAR);
@@ -74,13 +54,17 @@ Flex FLEX_MENOR(FLEX_PIN_MENOR);
 
 Adafruit_MPU6050 mpu;
 
-BluetoothSerial SerialBT;
+BLEServer *pServer;
+BLEService *pService;
+BLECharacteristic *pCharacteristic;
 
 //Variaveis para identificar as letras
 int count = 0;
 char letraAnt = ' ';
 
 String command = "";
+
+bool isRecognizeLetter = true;
 
 //CONFIGURAÇÔES INICIAL
 void setup() 
@@ -91,8 +75,26 @@ void setup()
     while (!Serial) ; // wait for serial port to connect. Needed for native USB
     Serial.println("start");
 
-    SerialBT.begin("GloveLibras");
-
+    BLEDevice::init("GloveLibra");
+    pServer = BLEDevice::createServer();
+    pService = pServer->createService(SERVICE_UUID);
+    pCharacteristic = pService->createCharacteristic(
+                                           CHARACTERISTIC_UUID,
+                                           BLECharacteristic::PROPERTY_READ |
+                                           BLECharacteristic::PROPERTY_WRITE |
+                                           BLECharacteristic::PROPERTY_NOTIFY
+                                         );
+                                         
+    pCharacteristic->setValue("Iniciando aplicação!");
+    pService->start();
+    BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
+    pCharacteristic->notify();
+    pAdvertising->addServiceUUID(SERVICE_UUID);
+    pAdvertising->setScanResponse(true);
+    pAdvertising->setMinPreferred(0x06);  // functions that help with iPhone connections issue
+    pAdvertising->setMinPreferred(0x12);
+    BLEDevice::startAdvertising();
+  
     if (!mpu.begin()) {
        Serial.println("Failed to find MPU6050 chip");
        while (1) {
@@ -104,20 +106,19 @@ void setup()
     mpu.setAccelerometerRange(MPU6050_RANGE_8_G);
     mpu.setGyroRange(MPU6050_RANGE_500_DEG);
     mpu.setFilterBandwidth(MPU6050_BAND_5_HZ);
-    //INICIALIZA OS VALORES DO SENSOR FLEX
-    //float sensorPolegar = FLEX_POLEGAR.read();
-    //float sensorIndicador = FLEX_INDICADOR.read();
-    //float sensorMeio = FLEX_MEIO.read();
-    //float sensorAnelar = FLEX_ANELAR.read();
-    //float sensorMenor = FLEX_MENOR.read();
-    /*
+
+    float sensorPolegar = FLEX_POLEGAR.read();
+    float sensorIndicador = FLEX_INDICADOR.read();
+    float sensorMeio = FLEX_MEIO.read();
+    float sensorAnelar = FLEX_ANELAR.read();
+    float sensorMenor = FLEX_MENOR.read();
+    
     while(millis()<15000)
     {
     
       if(analogRead(26) > 0)
       {
         //CALIBRA OS DADOS CONFORME O SENSOR
-
         //POLEGAR
         if(sensorPolegar<sensorMinPolegar)
         {
@@ -127,7 +128,6 @@ void setup()
         {
           sensorMaxPolegar=sensorPolegar;
         }
-
         //INDICADOR
         if(sensorIndicador<sensorMinIndicador)
         {
@@ -137,7 +137,6 @@ void setup()
         {
           sensorMaxIndicador=sensorIndicador;
         }
-
         //MEIO
         if(sensorMeio<sensorMinMeio)
         {
@@ -147,7 +146,6 @@ void setup()
         {
           sensorMaxMeio=sensorMeio;
         }
-
         //ANELAR
         if(sensorAnelar<sensorMinAnelar)
         {
@@ -157,7 +155,6 @@ void setup()
         {
           sensorMaxAnelar=sensorAnelar;
         }
-
         //MENOR
         if(sensorMenor<sensorMinMenor)
         {
@@ -168,7 +165,7 @@ void setup()
           sensorMaxMenor=sensorMenor;
         }
       }
-    }*/
+    }
     
 }
 
@@ -203,61 +200,64 @@ void loop()
     sensors_event_t a, g, temp;
     mpu.getEvent(&a, &g, &temp);  
     
-    //Serial.print(a.acceleration.x); Serial.print("\t");
-    //Serial.print(a.acceleration.y); Serial.print("\t");
-    //Serial.print(g.gyro.x); Serial.print("\t");
-    //Serial.print(g.gyro.y); Serial.print("\t");
-    //Serial.println(" ");
-    //Serial.println(touchRead(T0)); //GPIO4
-    //Serial.println(touchRead(T3)); //GPIO0
-
-    char letraAtual = getLetter(anguloPolegar, anguloIndicador, anguloMeio, anguloAnelar, anguloMenor, a, touchRead(T0), touchRead(T3));
-    //char numeroAtual = getNumber(anguloPolegar, anguloIndicador, anguloMeio, anguloAnelar, anguloMenor, a, touchRead(T0), touchRead(T3));
-    
-    SerialBT.println("GIOVANE");  
+    std::string valueApp = pCharacteristic->getValue();
   
-    if (SerialBT.available()){
-      char incomingChar = SerialBT.read();
-      if (incomingChar != '\n'){
-        command += String(incomingChar);
-      }
-      else{
-        Serial.print(command);  
-        command = "";
-      }
+    if(valueApp == "recognizeLetter"){
+      isRecognizeLetter= true;
+    }
+    
+    if(valueApp == "recognizeNumber"){
+      isRecognizeLetter= false;
     }
 
-    //if(letraAtual == letraAnt){
-    //  count++;
-    //}else{
-    //  count = 0;
-    //};
+    char recognizeGestual = ' ';
 
+    //Se for reconhecimento de letras
+    if(isRecognizeLetter){
+      recognizeGestual = getLetter(anguloPolegar, anguloIndicador, anguloMeio, anguloAnelar, anguloMenor, a, touchRead(T0), touchRead(T3));
+      //Imprime os valores
+      Serial.print(F("LETTER: ")); Serial.println(String(anguloPolegar) + "  " + String(anguloIndicador) + "  " + 
+                                                         String(anguloMeio) + "  " + String(anguloAnelar) + "  " + String(anguloMenor) + "  " + a.acceleration.y + "  " + "  " + a.acceleration.x + "  " +
+                                                         (recognizeGestual));
+    } else {
+      recognizeGestual = getNumber(anguloPolegar, anguloIndicador, anguloMeio, anguloAnelar, anguloMenor, a, touchRead(T0), touchRead(T3));
+      //Imprime os valores
+      Serial.print(F("NUMBER: ")); Serial.println(String(anguloPolegar) + "  " + String(anguloIndicador) + "  " + 
+                                                        String(anguloMeio) + "  " + String(anguloAnelar) + "  " + String(anguloMenor) + "  " + a.acceleration.y + "  " +
+                                                        (recognizeGestual));
+    }
 
-    //if(count == 4){
-    //  Serial.println(letraAtual);
-    //  count = 0;
-    //}
-    
-    //Imprime os valores
-    Serial.print(F("FLEX_INDICADOR: ")); Serial.println(String(anguloPolegar) + "  " + String(anguloIndicador) + "  " + 
-                                                       String(anguloMeio) + "  " + String(anguloAnelar) + "  " + String(anguloMenor) + "  " + a.acceleration.y + "  " + "  " + a.acceleration.x + "  " +
-                                                       (letraAtual));
-    
-    //Imprime os valores
-    //Serial.print(F("FLEX_INDICADOR: ")); Serial.println(String(anguloPolegar) + "  " + String(anguloIndicador) + "  " + 
-    //                                                    String(anguloMeio) + "  " + String(anguloAnelar) + "  " + String(anguloMenor) + "  " + a.acceleration.y + "  " +
-    //                                                    (numeroAtual));
-
-                                                    
-    delay(300);    
+    //SE NÂO ESTIVER RECONHECENDO NADA IGNORA
+    if(recognizeGestual != ' '){
+      if(recognizeGestual == letraAnt){
+        count++;
+      }else{
+        count = 0;
+      };
+  
+      //SE O GESTO ESTA SENDO COMPREENDIDO NUMA SEQUENCIA OU SE FOR UMA LETRA DE MOVIMENTO, NOTIFICA O APLICATIVO
+      if((count == 3) || (recognizeGestual == 'J') || ((recognizeGestual == 'K')) || (recognizeGestual == 'Z') || ((recognizeGestual == 'R'))){
+        Serial.println(recognizeGestual);
+        count = 0;
+         
+        std::string stringValue((char*)&recognizeGestual, 2);
+        pCharacteristic->setValue(stringValue);
+        pCharacteristic->notify();
+        //Notifica e não envia mais a letra
+        pCharacteristic->setValue(" ");
+      }
+  
+      letraAnt = recognizeGestual;
+    }
+                                         
+    delay(200);    
 }
 
 /**
  * Verifica os valores dos angulos para capturar as letras
  */
 char getLetter(float POLEGAR, float INDICADOR, float MEIO, float ANELAR, float MENOR, sensors_event_t MPU, float toqueIndPol, float toqueIndMeio) {
-  
+
   if((POLEGAR >= 85) && (INDICADOR >= 50 && INDICADOR <= 65) && (MEIO >= 60 && MEIO <= 70) && (ANELAR >= 60 && ANELAR <= 70) && (MENOR >= 65 && MENOR <= 80)){
     return 'A';
   }else if(((POLEGAR <= 80 && POLEGAR >= 65) && (INDICADOR >= 88) && (MEIO >= 88) && (ANELAR >= 88) && (MENOR >= 88))){
@@ -276,23 +276,23 @@ char getLetter(float POLEGAR, float INDICADOR, float MEIO, float ANELAR, float M
     return 'H';
   }else if(((POLEGAR >= 70 && POLEGAR <= 80) && (INDICADOR >= 50 && INDICADOR <= 70) && (MEIO >= 60 && MEIO <= 70) && (ANELAR >= 60 && ANELAR <= 80) && (MENOR >= 88) && (MPU.acceleration.y <= 4))){
     return 'I';
-  }else if(((POLEGAR >= 70 && POLEGAR <= 80) && (INDICADOR >= 50 && INDICADOR <= 70) && (MEIO >= 60 && MEIO <= 70) && (ANELAR >= 70 && ANELAR <= 80) && (MENOR >= 88) && ((MPU.acceleration.y >= 8 && MPU.acceleration.y <= 10)))){ //VERIFICAR OUTROS SENSORES
+  }else if(((POLEGAR >= 70 && POLEGAR <= 80) && (INDICADOR >= 50 && INDICADOR <= 70) && (MEIO >= 60 && MEIO <= 70) && (ANELAR >= 70 && ANELAR <= 80) && (MENOR >= 88) && ((MPU.acceleration.y >= 7)))){ //VERIFICAR OUTROS SENSORES
     return 'J';
   }else if((((POLEGAR >= 85) && (INDICADOR >= 85) && (MEIO >= 85) && (ANELAR >= 60 && ANELAR <= 70) && (MENOR >= 70 && MENOR <= 80)) && ((MPU.acceleration.y <= 7)) && ((MPU.acceleration.x >= 8)))){ //VERIFICAR SENSORES
     return 'K';
-  }else if(((POLEGAR >= 88) && (INDICADOR >= 88) && (MEIO >= 55 && MEIO <= 70) && (ANELAR >= 55 && ANELAR <= 70) && (MENOR >= 70 && MENOR <= 80) && (toqueIndPol >= 36))){ //toquee entre polegar e indicador n te
+  }else if(((POLEGAR >= 88) && (INDICADOR >= 88) && (MEIO >= 55 && MEIO <= 70) && (ANELAR >= 55 && ANELAR <= 70) && (MENOR >= 70 && MENOR <= 80) && (toqueIndPol >= 30))){ //toquee entre polegar e indicador n te
     return 'L';
   }else if(((POLEGAR >= 80 && POLEGAR <= 87) && (INDICADOR >= 87) && (MEIO >= 87) && (ANELAR >= 87) && (MENOR <= 87)) && (toqueIndMeio <= 30) && (MPU.acceleration.x <= 0)){
     return 'M';
   }else if(((POLEGAR >= 80) && (INDICADOR >= 87) && (MEIO >= 87) && (ANELAR >= 55 && ANELAR <= 70) && (MENOR <= 87)) && (toqueIndMeio <= 30) && (MPU.acceleration.x <= 0)){
     return 'N';
-  }else if(((POLEGAR <= 80) && (INDICADOR >= 70 && INDICADOR <= 80) && (MEIO >= 70 && MEIO <= 80) && (ANELAR >= 70 && ANELAR <= 80) && (MENOR >= 75 && MENOR <= 87))){
+  }else if(((POLEGAR <= 80) && (INDICADOR >= 60 && INDICADOR <= 80) && (MEIO >= 70 && MEIO <= 80) && (ANELAR >= 70 && ANELAR <= 80) && (MENOR >= 75 && MENOR <= 87))){
     return 'O';
   }else if(((POLEGAR >= 88) && (INDICADOR >= 88) && (MEIO >= 88) && (ANELAR >= 60 && ANELAR <= 70) && (MENOR >= 70 && MENOR <= 80)) && ((MPU.acceleration.y >= 8 && MPU.acceleration.y <= 10)) && ((MPU.acceleration.x <= 2.30))){ //VERICAR SENSORES
     return 'P';
   }else if(((POLEGAR >= 88) && (INDICADOR >= 88) && (MEIO >= 65 && MEIO <= 75) && (ANELAR >= 60 && ANELAR <= 70) && (MENOR >= 75 && MENOR <= 85) && (toqueIndPol <= 30) && (MPU.acceleration.x <= 0))){//mesma que o G virado para baixo
     return 'Q';
-  }else if(((POLEGAR <= 75) && (INDICADOR == 87) && (MEIO >= 85) && (ANELAR >= 55 && ANELAR <= 70) && (MENOR <= 85))){ //VERIFICAR SENSORES
+  }else if(((POLEGAR <= 75) && (INDICADOR <= 87) && (MEIO >= 85) && (ANELAR >= 55 && ANELAR <= 70) && (MENOR <= 85))){ //VERIFICAR SENSORES
     return 'R';
   }else if((POLEGAR <= 70) && (INDICADOR >= 50 && INDICADOR <= 65) && (MEIO >= 60 && MEIO <= 70) && (ANELAR >= 60 && ANELAR <= 70) && (MENOR >= 65 && MENOR <= 80)){
     return 'S';
@@ -321,11 +321,11 @@ char getLetter(float POLEGAR, float INDICADOR, float MEIO, float ANELAR, float M
 char getNumber(float POLEGAR, float INDICADOR, float MEIO, float ANELAR, float MENOR, sensors_event_t MPU, float toqueIndPol, float toqueIndMeio) {
 if(((POLEGAR >= 75 && POLEGAR <= 85) && (INDICADOR >= 70 && INDICADOR <= 80) && (MEIO >= 70 && MEIO <= 80) && (ANELAR >= 70 && ANELAR <= 80) && (MENOR >= 75 && MENOR <= 87))){
     return '0';
-  }else if(((POLEGAR >= 88) && (INDICADOR >= 50 && INDICADOR <= 65) && (MEIO >= 55 && MEIO <= 70) && (ANELAR >= 55 && ANELAR <= 70) && (MENOR >= 68 && MENOR <= 77) && (MPU.acceleration.y >= 8))){
+  }else if(((POLEGAR >= 70 && POLEGAR <= 83) && (INDICADOR >= 88) && (MEIO >= 55 && MEIO <= 70) && (ANELAR >= 55 && ANELAR <= 70) && (MENOR <= 80))){
     return '1';
-  }else if(((POLEGAR >= 88) && (INDICADOR >= 88) && (MEIO >= 55 && MEIO <= 70) && (ANELAR >= 55 && ANELAR <= 70) && (MENOR >= 70 && MENOR <= 80)) && (toqueIndPol >= 35)){
+  }else if(((POLEGAR <= 80) && (INDICADOR >= 89) && (MEIO >= 87) && (ANELAR >= 55 && ANELAR <= 70) && (MENOR <= 87)) && (toqueIndPol >= 35)){
     return '2';
-  }else if(((POLEGAR >= 88) && (INDICADOR >= 88) && (MEIO >= 88) && (ANELAR >= 55 && ANELAR <= 70) && (MENOR >= 70 && MENOR <= 80)) && (toqueIndMeio >= 35)){
+  }else if((((POLEGAR >= 80 && POLEGAR <= 87) && (INDICADOR >= 87) && (MEIO >= 87) && (ANELAR >= 87) && (MENOR <= 87)) && (toqueIndMeio >= 35) && (MPU.acceleration.y <= 4))){
     return '3';
   }else if(((POLEGAR <= 80 && POLEGAR >= 65) && (INDICADOR >= 88) && (MEIO >= 88) && (ANELAR >= 88) && (MENOR >= 88)) && (toqueIndMeio >= 35)){
     return '4';
