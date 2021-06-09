@@ -204,10 +204,12 @@ void loop()
   
     if(valueApp == "recognizeLetter"){
       isRecognizeLetter= true;
+      Serial.println("Entrou");
     }
     
     if(valueApp == "recognizeNumber"){
       isRecognizeLetter= false;
+      Serial.println("Entrssou");
     }
 
     char recognizeGestual = ' ';
@@ -236,7 +238,7 @@ void loop()
       };
   
       //SE O GESTO ESTA SENDO COMPREENDIDO NUMA SEQUENCIA OU SE FOR UMA LETRA DE MOVIMENTO, NOTIFICA O APLICATIVO
-      if((count == 3) || (recognizeGestual == 'J') || ((recognizeGestual == 'K')) || (recognizeGestual == 'Z') || ((recognizeGestual == 'R'))){
+      if((count == 4) || (recognizeGestual == 'J') || ((recognizeGestual == 'K')) || (recognizeGestual == 'Z') || ((recognizeGestual == 'R') && (count == 2))){
         Serial.println(recognizeGestual);
         count = 0;
          
